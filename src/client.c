@@ -13,8 +13,8 @@
 #define TAILLE_BUFFER 128
 
 void recupererDateEtHeure(char *adresseServeur, char *portServeur, char *resultat);
-int envoyerRequete(int socket, struct sockaddr_in adresseServeur);
-int lireResultat(int socket, char *datagram);
+int envoyerRequete(int socket);
+int lireResultat(int socket, char *buffer);
 int chargerConfig(const char *nomFichier, char *ip, char *port);
 
 int main(int argc, char **argv) {
@@ -35,7 +35,7 @@ int main(int argc, char **argv) {
     }
 
     printf("Contacting server %s:%s\n", adresseServeur, portServeur);
-    
+
     recupererDateEtHeure(adresseServeur, portServeur, buffer);
     printf("%s", buffer);
     return 1;
@@ -43,36 +43,35 @@ int main(int argc, char **argv) {
 
 void recupererDateEtHeure(char *adresseServeur, char *portServeur, char *resultat) {
     struct sockaddr_in addrServeur;
-    int socketUDP = 0;
-    int nbCaracteres = 0;
+    int socketTCP = 0;
 
     addrServeur = construireAdresseTCPUDPDepuisChaine(adresseServeur, portServeur);
-    socketUDP = socket(PF_INET, SOCK_DGRAM, 0);
+    socketTCP = creerSocketTCPClient(addrServeur);
 
-    if (socketUDP != -1) {
-        envoyerRequete(socketUDP, addrServeur);
-        nbCaracteres = lireResultat(socketUDP, resultat);
-
-        if (nbCaracteres != -1) {
-            resultat[nbCaracteres] = '\0';
-        }
-        close(socketUDP);
+    if (socketTCP != -1) {
+        envoyerRequete(socketTCP);
+        lireResultat(socketTCP, resultat);
+        close(socketTCP);
     }
     else {
         resultat[0] = '\0';
     }
 }
 
-int envoyerRequete(int socket, struct sockaddr_in adresseServeur) {
-    char datagram[]="%A %b %d %H:%M:%S %Y\n";
-    int longuerAdresseServeur = sizeof(adresseServeur);
-    return sendto(socket, datagram, sizeof(datagram), 0, (struct sockaddr *)&adresseServeur, longuerAdresseServeur);
+int envoyerRequete(int socket) {
+    char formatDateHeure[]="%A %b %d %H:%M:%S %Y\n";
+    return write(socket,formatDateHeure,strlen(formatDateHeure));
 }
 
-int lireResultat(int socket, char *datagram) {
-    struct sockaddr_in adresseReponse;
-    socklen_t longueurAdresseReponse = sizeof(adresseReponse);
-    return recvfrom(socket, datagram, TAILLE_BUFFER, 0, (struct sockaddr *)&adresseReponse, &longueurAdresseReponse);
+int lireResultat(int socket, char *buffer) {
+    int nbCaracteres = 0;
+    nbCaracteres = read(socket, buffer, TAILLE_BUFFER - 1);
+
+    if (nbCaracteres != -1) {
+        buffer[nbCaracteres] = '\0';
+    }
+
+    return nbCaracteres;
 }
 
 int chargerConfig(const char *nomFichier, char *ip, char *port) {

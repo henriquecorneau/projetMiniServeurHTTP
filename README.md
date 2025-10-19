@@ -4,7 +4,7 @@ make
 ```
 2 - Listen on tcpdump (1º terminal)
 ```bash
-sudo tcpdump -i lo -s 0 -w capture.pcap udp port 9099
+sudo tcpdump -i lo -s 0 -w capture.pcap tcp port 8080
 ```
 3 - Init server (2º terminal)
 ```bash

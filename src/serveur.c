@@ -12,8 +12,10 @@
 
 #define TAILLE_BUFFER 128
 
-int ecouter(int socketServeur);
-int traiterRequete(int socketServeur, char *datagram, struct sockaddr_in adresseClient, int longueurAdresseClient);
+int ecouter(int socketServeur, int longueurFileDAttente);
+int traiterRequete(int socketClient);
+int lireRequete(int socket, char *formatDateHeure);
+int envoyerResultat(int socket, char *formatDateHeure);
 int chargerConfig(const char *nomFichier, char *ip, char *port);
 
 int main(int argc, char **argv) {
@@ -34,49 +36,72 @@ int main(int argc, char **argv) {
     }
 
     printf("Starting server on %s:%s\n", adresseServeur, portServeur);
-    socketServeur = creerSocketUDPServeur(construireAdresseTCPUDPDepuisChaine(adresseServeur, portServeur));
+    socketServeur = creerSocketTCPServeur(construireAdresseTCPUDPDepuisChaine(adresseServeur, portServeur));
 
     if (socketServeur != -1) {
-        ecouter(socketServeur);
+        ecouter(socketServeur, 10);
     }
 
     return 1;
 }
 
-int ecouter(int socketServeur) {
+int ecouter(int socketServeur, int longueurFileDAttente) {
     socklen_t longueurAdresseClient = 0;
     struct sockaddr_in adresseClient;
     int erreur = 0;
-    char datagram[TAILLE_BUFFER] = {0};
-    int nbOctets = 0;
+    int socketClient = 0;
 
     printf("Server is listening...\n");
+    erreur = listen(socketServeur, longueurFileDAttente);
     while (erreur != -1) {
         longueurAdresseClient = sizeof(adresseClient);
-        nbOctets = recvfrom(socketServeur, datagram, sizeof(datagram), 0, (struct sockaddr *)&adresseClient, &longueurAdresseClient);
+        socketClient = accept(socketServeur, (struct sockaddr *)&adresseClient, &longueurAdresseClient);
 
-        if (nbOctets != -1) {
-            printf("Received request\n");
-            datagram[nbOctets] = 0;
-            nbOctets = traiterRequete(socketServeur, datagram, adresseClient, longueurAdresseClient);
+        if (socketClient != -1) {
+            if (traiterRequete(socketClient)) {
+                printf("Request processed successfully.\n");
+                close(socketClient);
+            }
+            else {
+                erreur = -1;
+            }
         }
         else {
             erreur = -1;
         }
-    }
-    close(socketServeur);
+    }  
     return erreur;
 }
 
-int traiterRequete(int socketServeur, char *datagram, struct sockaddr_in adresseClient, int longueurAdresseClient) {
-    time_t heureCourante;
+int traiterRequete(int socketClient) {
+    char formatDateHeure[TAILLE_BUFFER] = {0};
+
+    if (lireRequete(socketClient, formatDateHeure) != -1) {
+        return envoyerResultat(socketClient, formatDateHeure);
+    }
+    else {
+        return -1;
+    }
+}
+
+int lireRequete(int socket, char *formatDateHeure) {
     int nbCaracteres = 0;
+    nbCaracteres = read(socket, formatDateHeure, TAILLE_BUFFER - 1);
+
+    if (nbCaracteres != -1) {
+        formatDateHeure[nbCaracteres] = '\0';
+    }
+    return nbCaracteres;
+}
+
+int envoyerResultat(int socket, char *formatDateHeure) {
+    time_t heureCourante;
     char buffer[TAILLE_BUFFER] = {0};
-
+    int nbCaracteres = 0;
     time(&heureCourante);
-    nbCaracteres = (int) strftime(buffer, TAILLE_BUFFER, datagram, localtime(&heureCourante));
+    nbCaracteres = (int)strftime(buffer, sizeof(buffer), formatDateHeure, localtime(&heureCourante));
 
-    return sendto(socketServeur, buffer, nbCaracteres, 0, (struct sockaddr *)&adresseClient, longueurAdresseClient);
+    return write(socket, buffer, nbCaracteres);
 }
 
 int chargerConfig(const char *nomFichier, char *ip, char *port) {
