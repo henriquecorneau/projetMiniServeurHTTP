@@ -1,4 +1,4 @@
-1 - Compile serveur and client
+1 - Compile main
 ```bash
 make
 ```
@@ -8,11 +8,11 @@ sudo tcpdump -i lo -s 0 -w capture.pcap tcp port 8080
 ```
 3 - Init server (2º terminal)
 ```bash
-./serveur
+./main
 ```
-4 - Init client (3º terminal)
+4 - Requistion http on web app
 ```bash
-./client
+http://127.0.0.1:8080/
 ```
 5 - Exit tcpdump and after visualizate on wireshark
 ```bash

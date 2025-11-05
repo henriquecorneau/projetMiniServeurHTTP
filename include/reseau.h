@@ -12,6 +12,5 @@ struct sockaddr_in construireAdresseTCPUDPDepuisChaine(char *adresseIP, char *po
 int creerSocketTCPClient(struct sockaddr_in adresse);
 int creerSocketTCPServeur(struct sockaddr_in adresse);
 int creerSocketTCPUDPServeur(struct sockaddr_in adresse, int mode);
-int creerSocketUDPServeur(struct sockaddr_in adresse);
 
 #endif

@@ -8,41 +8,23 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+
 #include "reseau.h"
+#include "serveur.h"
 
-#define TAILLE_BUFFER 128
+char dirServeur[64] = {0};
 
-int ecouter(int socketServeur, int longueurFileDAttente);
-int traiterRequete(int socketClient);
-int lireRequete(int socket, char *formatDateHeure);
-int envoyerResultat(int socket, char *formatDateHeure);
-int chargerConfig(const char *nomFichier, char *ip, char *port);
-
-int main(int argc, char **argv) {
-    char adresseServeur[64] = {0};
-    char portServeur[16] = {0};
+void startServeur(char *ipServeur, char *portServeur, char *rootServeur) {
     int socketServeur = 0;
+    strcpy(dirServeur, rootServeur);
 
-    chargerConfig("etc/server.conf", adresseServeur, portServeur);
-
-    if (argc >= 2) {
-        strncpy(adresseServeur, argv[1], 63);
-        adresseServeur[63] = '\0';
-    }
-
-    if (argc >= 3) {
-        strncpy(portServeur, argv[2], 15);
-        portServeur[15] = '\0';
-    }
-
-    printf("Starting server on %s:%s\n", adresseServeur, portServeur);
-    socketServeur = creerSocketTCPServeur(construireAdresseTCPUDPDepuisChaine(adresseServeur, portServeur));
+    printf("Starting server on %s:%s\n", ipServeur, portServeur);
+    printf("Server directory: %s\n", dirServeur);
+    socketServeur = creerSocketTCPServeur(construireAdresseTCPUDPDepuisChaine(ipServeur, portServeur));
 
     if (socketServeur != -1) {
         ecouter(socketServeur, 10);
     }
-
-    return 1;
 }
 
 int ecouter(int socketServeur, int longueurFileDAttente) {
@@ -50,6 +32,7 @@ int ecouter(int socketServeur, int longueurFileDAttente) {
     struct sockaddr_in adresseClient;
     int erreur = 0;
     int socketClient = 0;
+    pid_t PID;
 
     printf("Server is listening...\n");
     erreur = listen(socketServeur, longueurFileDAttente);
@@ -58,87 +41,114 @@ int ecouter(int socketServeur, int longueurFileDAttente) {
         socketClient = accept(socketServeur, (struct sockaddr *)&adresseClient, &longueurAdresseClient);
 
         if (socketClient != -1) {
-            if (traiterRequete(socketClient)) {
-                printf("Request processed successfully.\n");
-                close(socketClient);
+            if ((PID = fork()) != -1) {
+                if (PID == 0) {
+                    if (traiterRequete(socketClient)) {
+                        printf("Request processed successfully.\n");
+                        close(socketClient);
+                    }
+                    else {
+                        erreur = -1;
+                    }
+                }
+                else {
+                    close(socketClient);
+                }
             }
             else {
                 erreur = -1;
             }
-        }
+        }  
         else {
             erreur = -1;
         }
-    }  
+
+    }
     return erreur;
 }
 
 int traiterRequete(int socketClient) {
-    char formatDateHeure[TAILLE_BUFFER] = {0};
+    char request[TAILLE_BUFFER] = {0};
 
-    if (lireRequete(socketClient, formatDateHeure) != -1) {
-        return envoyerResultat(socketClient, formatDateHeure);
+    if (lireRequete(socketClient, request) != -1) {
+        printf("Request :\n%s\n", request);
+        return envoyerResultat(socketClient, request);
     }
     else {
         return -1;
     }
 }
 
-int lireRequete(int socket, char *formatDateHeure) {
+int lireRequete(int socket, char *request) {
     int nbCaracteres = 0;
-    nbCaracteres = read(socket, formatDateHeure, TAILLE_BUFFER - 1);
+    nbCaracteres = read(socket, request, TAILLE_BUFFER - 1);
 
     if (nbCaracteres != -1) {
-        formatDateHeure[nbCaracteres] = '\0';
+        request[nbCaracteres] = '\0';
     }
     return nbCaracteres;
 }
 
-int envoyerResultat(int socket, char *formatDateHeure) {
-    time_t heureCourante;
+int envoyerResultat(int socket, char *request) {
     char buffer[TAILLE_BUFFER] = {0};
     int nbCaracteres = 0;
-    time(&heureCourante);
-    nbCaracteres = (int)strftime(buffer, sizeof(buffer), formatDateHeure, localtime(&heureCourante));
+    char path[64] = {0};
+    char fullPath[128] = {0};
 
-    return write(socket, buffer, nbCaracteres);
+    sscanf(request, "GET %255s HTTP/1.0", path);
+    if (strcmp(path, "/") == 0) {
+        strcpy(path, "/index.html");
+    }
+    snprintf(fullPath, sizeof(fullPath), "%s%s", dirServeur, path);
+
+    FILE *fichier = fopen(fullPath, "rb");
+
+    if (fichier == NULL) {
+        sprintf(buffer, "HTTP/1.0 404 Not Found\r\n\r\n");
+        nbCaracteres = strlen(buffer) * sizeof(char);
+        return write(socket, buffer, nbCaracteres);
+    }
+
+    fseek(fichier, 0, SEEK_END);
+    long contentLength = ftell(fichier);
+    rewind(fichier);
+
+    const char *contentType = getContentType(fullPath);
+    snprintf(buffer, sizeof(buffer),
+             "HTTP/1.0 200 OK\r\n"
+             "Content-Type: %s\r\n"
+             "Content-Length: %ld\r\n"
+             "\r\n",
+             contentType, contentLength);
+
+    write(socket, buffer, strlen(buffer)* sizeof(char));
+
+    while ((nbCaracteres = fread(buffer, 1, sizeof(buffer), fichier)) > 0) {
+        write(socket, buffer, nbCaracteres);
+    }
+
+    fclose(fichier);
+    return 0;
 }
 
-int chargerConfig(const char *nomFichier, char *ip, char *port) {
-    FILE *file = fopen(nomFichier, "r");
-    if (!file) {
-        perror("Error opening config file");
-        return -1;
+void chargerConfig(const char *nomFichier, char *ip, char *port, char *root) {
+    FILE *fp = fopen(nomFichier,"r");
+
+    fscanf(fp, "ip=%s\n port=%s\n root=%s\n", ip, port, root);
+    fclose(fp);
+}
+
+const char *getContentType(const char *dirFile) {
+    const char *extension = strrchr(dirFile, '.');
+
+    if (strcmp(extension, ".html") == 0) {
+        return "text/html";
+    } else if (strcmp(extension, ".png") == 0) {
+        return "image/png";
+    } else if (strcmp(extension, ".jpg") == 0 || strcmp(extension, ".jpeg") == 0) {
+        return "image/jpeg";
+    } else {
+        return "text/plain";
     }
-
-    char line[128];
-    ip[0] = '\0';
-    port[0] = '\0';
-
-    while (fgets(line, sizeof(line), file)) {
-        // remove \n
-        line[strcspn(line, "\n")] = 0;
-
-        // ignore comments and empty lines
-        if (line[0] == '\0' || line[0] == '#')
-            continue;
-
-        if (strncmp(line, "ip=", 3) == 0) {
-            strncpy(ip, line + 3, 63);
-            ip[63] = '\0';
-        } else if (strncmp(line, "port=", 5) == 0) {
-            strncpy(port, line + 5, 15);
-            port[15] = '\0';
-        }
-    }
-
-    fclose(file);
-
-    if (ip[0] == '\0' || port[0] == '\0') {
-        fprintf(stderr, "Error ip or port empty\n");
-        return -1;
-    }
-
-    return 0; 
 }
 

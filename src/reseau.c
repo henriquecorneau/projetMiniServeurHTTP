@@ -30,10 +30,6 @@ int creerSocketTCPUDPServeur(struct sockaddr_in adresse, int mode) {
     }
 }
 
-int creerSocketUDPServeur(struct sockaddr_in adresse) {
-    return creerSocketTCPUDPServeur(adresse, SOCK_DGRAM);
-}
-
 int creerSocketTCPClient(struct sockaddr_in adresse) {
     int resultat = 0;
     int longueurAdresse = 0;
